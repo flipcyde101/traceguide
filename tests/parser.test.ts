@@ -12,7 +12,7 @@ describe("Playwright trace.zip compiler", () => {
     expect(raw.steps[1].title).toContain("dillon@acme-staging.io");
     expect(raw.steps[3].title).toContain('"Create Production Key"');
     expect(raw.steps[3].clickXPercent).toBeCloseTo(50, 0);
-    expect(raw.steps[3].frameDataUri).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(raw.steps[3].frameDataUri).toMatch(/^data:image\/png;base64,/);
 
     const redacted = parsePlaywrightTraceZip(zip, { title: "Onboarding", redactPii: true });
     expect(redacted.redactedTotal).toBeGreaterThanOrEqual(2);

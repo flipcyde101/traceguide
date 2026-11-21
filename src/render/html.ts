@@ -1,6 +1,8 @@
 import type { Guide } from "../types.js";
 import { renderGuideMarkdown } from "./markdown.js";
 
+const SAFE_RASTER_DATA_URI_RE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -19,18 +21,39 @@ function safeJsonForScript(data: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
-export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string } = {}): string {
-  const markdown = renderGuideMarkdown(guide);
-  const embedSrc = opts.embedUrl ?? `https://your-traceguide-host/guides/${guide.id}`;
-  const iframeSnippet = `<iframe src="${embedSrc}" width="100%" height="640" style="border:1px solid #30363d;border-radius:12px;" loading="lazy"></iframe>`;
-  const payload = safeJsonForScript({ guide, markdown, iframeSnippet });
+function sanitizeEmbedUrl(raw: string | undefined, guideId: string): string {
+  const fallback = `https://your-traceguide-host/guides/${encodeURIComponent(guideId)}`;
+  if (!raw) return fallback;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fallback;
+    return parsed.toString();
+  } catch {
+    return fallback;
+  }
+}
+
+export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string; scriptNonce?: string } = {}): string {
+  const sanitizedGuide: Guide = {
+    ...guide,
+    steps: guide.steps.map((s) => ({
+      ...s,
+      frameDataUri: s.frameDataUri && SAFE_RASTER_DATA_URI_RE.test(s.frameDataUri) ? s.frameDataUri : undefined,
+    })),
+  };
+
+  const markdown = renderGuideMarkdown(sanitizedGuide);
+  const embedSrc = sanitizeEmbedUrl(opts.embedUrl, sanitizedGuide.id);
+  const iframeSnippet = `<iframe src="${escapeHtml(embedSrc)}" width="100%" height="640" style="border:1px solid #30363d;border-radius:12px;" loading="lazy"></iframe>`;
+  const payload = safeJsonForScript({ guide: sanitizedGuide, markdown, iframeSnippet });
+  const nonceAttr = opts.scriptNonce ? ` nonce="${escapeHtml(opts.scriptNonce)}"` : "";
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(guide.title)} | traceguide</title>
+  <title>${escapeHtml(sanitizedGuide.title)} | traceguide</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
@@ -51,8 +74,8 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string } = {}):
     .step-num { font-size: 11px; color: #58a6ff; font-weight: 700; display: block; margin-bottom: 2px; }
     .stage-wrap { padding: 20px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
     .step-header { width: 100%; max-width: 960px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    .frame-box { position: relative; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #010409; border: 1px solid #30363d; border-radius: 12px; overflow: hidden; display: grid; place-items: center; }
-    .frame-box img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .frame-box { position: relative; width: 100%; max-width: 960px; max-height: 70vh; background: #010409; border: 1px solid #30363d; border-radius: 12px; overflow: hidden; display: grid; place-items: center; }
+    .frame-box img { width: 100%; height: 100%; object-fit: fill; display: block; }
     .pulse-ring { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; border: 3px solid #38bdf8; background: rgba(56, 189, 248, 0.25); box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.22); pointer-events: none; animation: tgPulse 1.5s infinite; }
     @keyframes tgPulse { 0% { transform: scale(0.92); opacity: 1; } 70% { transform: scale(1.35); opacity: 0.3; } 100% { transform: scale(0.92); opacity: 1; } }
     .blur-mask { position: absolute; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: rgba(13, 17, 23, 0.72); border: 1px dashed #3fb950; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3fb950; letter-spacing: 0.04em; }
@@ -62,9 +85,9 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string } = {}):
 <body>
   <header>
     <div class="brand">
-      <strong>${escapeHtml(guide.title)}</strong>
-      <span class="badge">${guide.steps.length} steps</span>
-      <span class="badge redacted">${guide.redactedTotal} PII redacted</span>
+      <strong>${escapeHtml(sanitizedGuide.title)}</strong>
+      <span class="badge">${sanitizedGuide.steps.length} steps</span>
+      <span class="badge redacted">${sanitizedGuide.redactedTotal} PII redacted</span>
     </div>
     <div class="actions">
       <button id="copy-md-btn">Copy Markdown</button>
@@ -85,7 +108,7 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string } = {}):
       <div id="caption-bar" class="caption-bar"></div>
     </section>
   </main>
-  <script>
+  <script${nonceAttr}>
     const DATA = ${payload};
     const steps = DATA.guide.steps || [];
     let current = 0;
@@ -124,8 +147,14 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string } = {}):
       prevBtn.disabled = current <= 0;
       nextBtn.disabled = current >= steps.length - 1;
 
+      if (step.viewportWidth > 0 && step.viewportHeight > 0) {
+        frameEl.style.aspectRatio = step.viewportWidth + " / " + step.viewportHeight;
+      } else {
+        frameEl.style.aspectRatio = "16 / 9";
+      }
+
       frameEl.replaceChildren();
-      if (step.frameDataUri) {
+      if (step.frameDataUri && /^data:image\\/(?:png|jpeg|webp);base64,/i.test(step.frameDataUri)) {
         const img = document.createElement("img");
         img.src = step.frameDataUri;
         img.alt = step.title;
@@ -170,9 +199,10 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string } = {}):
       try {
         await navigator.clipboard.writeText(text);
         btn.textContent = "Copied!";
-        setTimeout(() => { btn.textContent = label; }, 1400);
       } catch {
         btn.textContent = "Copy failed";
+      } finally {
+        setTimeout(() => { btn.textContent = label; }, 1400);
       }
     }
     document.getElementById("copy-md-btn").addEventListener("click", (e) => copyText(e.target, DATA.markdown, "Copy Markdown"));

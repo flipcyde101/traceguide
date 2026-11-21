@@ -1,34 +1,79 @@
-import { createZipBuffer } from "../zip/archive.js";
+import { deflateSync } from "node:zlib";
+import { crc32, createZipBuffer } from "../zip/archive.js";
 
-function makeDemoSvgFrame(heading: string, highlightLabel: string, x: number, y: number): Buffer {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <rect width="1280" height="720" fill="#0f172a"/>
-  <rect x="0" y="0" width="1280" height="64" fill="#1e293b"/>
-  <text x="32" y="40" fill="#38bdf8" font-family="sans-serif" font-size="22" font-weight="bold">AcmeCloud Dashboard</text>
-  <rect x="180" y="120" width="920" height="480" rx="16" fill="#1e293b" stroke="#334155" stroke-width="2"/>
-  <text x="220" y="180" fill="#f8fafc" font-family="sans-serif" font-size="28" font-weight="bold">${heading}</text>
-  <rect x="${x - 160}" y="${y - 26}" width="320" height="52" rx="10" fill="#1f6feb"/>
-  <text x="${x}" y="${y + 7}" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="18" font-weight="bold">${highlightLabel}</text>
-</svg>`;
-  return Buffer.from(svg, "utf8");
+const PNG_SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function makePngChunk(type: string, data: Buffer): Buffer {
+  const typeBuf = Buffer.from(type, "ascii");
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(data.length, 0);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
+}
+
+function drawRect(
+  rgb: Uint8Array,
+  w: number,
+  h: number,
+  x0: number,
+  y0: number,
+  rw: number,
+  rh: number,
+  color: [number, number, number]
+): void {
+  for (let y = Math.max(0, y0); y < Math.min(h, y0 + rh); y++) {
+    for (let x = Math.max(0, x0); x < Math.min(w, x0 + rw); x++) {
+      const idx = (y * w + x) * 3;
+      rgb[idx] = color[0];
+      rgb[idx + 1] = color[1];
+      rgb[idx + 2] = color[2];
+    }
+  }
+}
+
+function makeDemoPngFrame(accent: [number, number, number], targetX: number, targetY: number): Buffer {
+  const w = 320;
+  const h = 180;
+  const rgb = new Uint8Array(w * h * 3);
+  drawRect(rgb, w, h, 0, 0, w, h, [15, 23, 42]);
+  drawRect(rgb, w, h, 0, 0, w, 18, [30, 41, 59]);
+  drawRect(rgb, w, h, 42, 30, 236, 124, [30, 41, 59]);
+  drawRect(rgb, w, h, 56, 44, 140, 10, [148, 163, 184]);
+  const bx = Math.round((targetX / 1280) * w) - 44;
+  const by = Math.round((targetY / 720) * h) - 9;
+  drawRect(rgb, w, h, bx, by, 88, 18, accent);
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const stride = w * 3;
+  const raw = Buffer.alloc(h * (1 + stride));
+  for (let y = 0; y < h; y++) {
+    raw[y * (1 + stride)] = 0;
+    raw.set(rgb.subarray(y * stride, (y + 1) * stride), y * (1 + stride) + 1);
+  }
+  return Buffer.concat([PNG_SIG, makePngChunk("IHDR", ihdr), makePngChunk("IDAT", deflateSync(raw)), makePngChunk("IEND", Buffer.alloc(0))]);
 }
 
 /**
  * Generates a realistic, valid Playwright trace.zip archive containing a 4-step
- * "Create Production API Key" onboarding flow with click coordinates and PII fields.
+ * "Create Production API Key" onboarding flow with raster PNG frames, click coordinates, and PII fields.
  */
 export function buildDemoPlaywrightTraceZip(): Buffer {
-  const frame1 = makeDemoSvgFrame("Workspace Settings", "Open API Keys", 420, 310);
-  const frame2 = makeDemoSvgFrame("Verify Account Email", "dillon@acme-staging.io", 520, 330);
-  const frame3 = makeDemoSvgFrame("Confirm Master Secret", "sk-live-98432109843210abcdef", 520, 410);
-  const frame4 = makeDemoSvgFrame("Key Provisioned", "Create Production Key", 640, 490);
+  const frame1 = makeDemoPngFrame([56, 189, 248], 420, 310);
+  const frame2 = makeDemoPngFrame([99, 102, 241], 520, 330);
+  const frame3 = makeDemoPngFrame([245, 158, 11], 520, 410);
+  const frame4 = makeDemoPngFrame([34, 197, 94], 640, 490);
 
   const traceLines = [
     JSON.stringify({ type: "context-options", options: { viewport: { width: 1280, height: 720 } } }),
-    JSON.stringify({ type: "screencast-frame", sha1: "frame1.svg", timestamp: 1000, width: 1280, height: 720 }),
-    JSON.stringify({ type: "screencast-frame", sha1: "frame2.svg", timestamp: 2000, width: 1280, height: 720 }),
-    JSON.stringify({ type: "screencast-frame", sha1: "frame3.svg", timestamp: 3000, width: 1280, height: 720 }),
-    JSON.stringify({ type: "screencast-frame", sha1: "frame4.svg", timestamp: 4000, width: 1280, height: 720 }),
+    JSON.stringify({ type: "screencast-frame", sha1: "frame1.png", timestamp: 1000, width: 1280, height: 720 }),
+    JSON.stringify({ type: "screencast-frame", sha1: "frame2.png", timestamp: 2000, width: 1280, height: 720 }),
+    JSON.stringify({ type: "screencast-frame", sha1: "frame3.png", timestamp: 3000, width: 1280, height: 720 }),
+    JSON.stringify({ type: "screencast-frame", sha1: "frame4.png", timestamp: 4000, width: 1280, height: 720 }),
     JSON.stringify({
       type: "before",
       callId: "c1",
@@ -64,9 +109,9 @@ export function buildDemoPlaywrightTraceZip(): Buffer {
 
   return createZipBuffer([
     { name: "test.trace", data: Buffer.from(traceLines, "utf8") },
-    { name: "resources/frame1.svg", data: frame1 },
-    { name: "resources/frame2.svg", data: frame2 },
-    { name: "resources/frame3.svg", data: frame3 },
-    { name: "resources/frame4.svg", data: frame4 },
+    { name: "resources/frame1.png", data: frame1 },
+    { name: "resources/frame2.png", data: frame2 },
+    { name: "resources/frame3.png", data: frame3 },
+    { name: "resources/frame4.png", data: frame4 },
   ]);
 }

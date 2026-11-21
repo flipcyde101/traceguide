@@ -5,20 +5,19 @@ import type { Guide, GuideStep, TraceParseOptions } from "../types.js";
 import { readZipBuffer } from "../zip/archive.js";
 
 interface TraceEvent {
-  type?: string;
-  callId?: string;
-  apiName?: string;
-  method?: string;
+  type?: unknown;
+  callId?: unknown;
+  apiName?: unknown;
+  method?: unknown;
   params?: Record<string, unknown>;
-  startTime?: number;
-  endTime?: number;
-  timestamp?: number;
+  startTime?: unknown;
+  endTime?: unknown;
+  timestamp?: unknown;
   point?: { x?: number; y?: number };
-  sha1?: string;
-  width?: number;
-  height?: number;
+  sha1?: unknown;
+  width?: unknown;
+  height?: unknown;
   options?: { viewport?: { width?: number; height?: number } };
-  title?: string;
 }
 
 interface ScreencastFrame {
@@ -40,24 +39,28 @@ const INTERACTIVE_METHODS = new Set([
   "selectOption",
 ]);
 
-function guessMimeFromBytes(buf: Buffer, name: string): string {
+/**
+ * Only allow safe raster image formats (PNG, JPEG, WebP) from untrusted trace archives.
+ */
+function detectRasterImageMime(buf: Buffer): string | null {
   if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
     return "image/png";
   }
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
     return "image/jpeg";
   }
-  if (buf.subarray(0, 64).toString("utf8").trimStart().startsWith("<svg")) {
-    return "image/svg+xml";
+  if (
+    buf.length >= 12 &&
+    buf.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buf.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
   }
-  if (name.toLowerCase().endsWith(".png")) return "image/png";
-  if (name.toLowerCase().endsWith(".svg")) return "image/svg+xml";
-  return "image/jpeg";
+  return null;
 }
 
 function cleanSelectorLabel(selector: string | undefined): string {
   if (!selector) return "element";
-  // Extract friendly ARIA/text/role labels from Playwright selectors like role=button[name="Create Key"] or text="Save"
   const nameAttr = /name=["']([^"']+)["']/i.exec(selector);
   if (nameAttr) return `"${nameAttr[1]}"`;
   const textSel = /(?:^|>>)text=["']?([^"'>]+)["']?/i.exec(selector);
@@ -119,9 +122,11 @@ function findClosestFrame(frames: ScreencastFrame[], targetTs: number): Screenca
 
 export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions = {}): Guide {
   const entries = readZipBuffer(zipBuf);
-  const traceFiles = [...entries.keys()].filter((name) => name.endsWith(".trace") || name.endsWith(".network") === false && name.includes("trace") && name.endsWith(".json"));
   const primaryTraceNames = [...entries.keys()].filter((name) => name.endsWith(".trace"));
-  const filesToParse = primaryTraceNames.length > 0 ? primaryTraceNames : traceFiles;
+  const fallbackTraceNames = [...entries.keys()].filter(
+    (name) => !name.endsWith(".network") && name.includes("trace") && name.endsWith(".json")
+  );
+  const filesToParse = primaryTraceNames.length > 0 ? primaryTraceNames : fallbackTraceNames;
 
   if (filesToParse.length === 0) {
     throw new Error("No Playwright .trace NDJSON file found inside ZIP archive.");
@@ -130,8 +135,8 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
   let viewportWidth = 1280;
   let viewportHeight = 720;
   const frames: ScreencastFrame[] = [];
-  const actionsByCallId = new Map<string, TraceEvent>();
-  const orderedCallIds: string[] = [];
+  const actionsByKey = new Map<string, { method: string; ev: TraceEvent }>();
+  const orderedKeys: string[] = [];
 
   for (const fileName of filesToParse) {
     const text = entries.get(fileName)!.toString("utf8");
@@ -144,6 +149,7 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
       } catch {
         continue;
       }
+      if (!ev || typeof ev !== "object") continue;
 
       if (ev.type === "context-options" && ev.options?.viewport) {
         if (typeof ev.options.viewport.width === "number" && ev.options.viewport.width > 0) {
@@ -155,30 +161,47 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
         continue;
       }
 
-      if (ev.type === "screencast-frame" && ev.sha1) {
-        frames.push({
-          timestamp: typeof ev.timestamp === "number" ? ev.timestamp : 0,
-          sha1: ev.sha1,
-          width: typeof ev.width === "number" && ev.width > 0 ? ev.width : viewportWidth,
-          height: typeof ev.height === "number" && ev.height > 0 ? ev.height : viewportHeight,
-        });
+      if (ev.type === "screencast-frame" && typeof ev.sha1 === "string" && ev.sha1.length > 0) {
+        const resBuf = entries.get(`resources/${ev.sha1}`) ?? entries.get(ev.sha1);
+        // Only register frames whose raster image actually exists in the archive
+        if (resBuf && detectRasterImageMime(resBuf)) {
+          frames.push({
+            timestamp: typeof ev.timestamp === "number" ? ev.timestamp : 0,
+            sha1: ev.sha1,
+            width: typeof ev.width === "number" && ev.width > 0 ? ev.width : viewportWidth,
+            height: typeof ev.height === "number" && ev.height > 0 ? ev.height : viewportHeight,
+          });
+        }
         continue;
       }
 
       if (ev.type === "before" || ev.type === "action") {
-        const method = ev.method ?? (ev.apiName ? ev.apiName.split(".").pop() : undefined);
+        const method =
+          typeof ev.method === "string"
+            ? ev.method
+            : typeof ev.apiName === "string"
+              ? ev.apiName.split(".").pop()
+              : undefined;
         if (!method || !INTERACTIVE_METHODS.has(method)) continue;
-        const callId = ev.callId ?? `step-${orderedCallIds.length + 1}`;
-        actionsByCallId.set(callId, { ...ev, method });
-        orderedCallIds.push(callId);
+        const rawCallId = typeof ev.callId === "string" && ev.callId ? ev.callId : `step-${orderedKeys.length + 1}`;
+        const key = `${fileName}::${rawCallId}`;
+        const existing = actionsByKey.get(key);
+        if (existing) {
+          // Merge fields instead of duplicating steps on duplicate callId (e.g. before + action)
+          existing.ev = { ...existing.ev, ...ev, params: { ...(existing.ev.params ?? {}), ...(ev.params ?? {}) } };
+        } else {
+          actionsByKey.set(key, { method, ev });
+          orderedKeys.push(key);
+        }
         continue;
       }
 
-      if ((ev.type === "after" || ev.type === "input") && ev.callId) {
-        const existing = actionsByCallId.get(ev.callId);
+      if ((ev.type === "after" || ev.type === "input") && typeof ev.callId === "string" && ev.callId) {
+        const key = `${fileName}::${ev.callId}`;
+        const existing = actionsByKey.get(key);
         if (existing) {
-          if (ev.point) existing.point = ev.point;
-          if (typeof ev.endTime === "number") existing.endTime = ev.endTime;
+          if (ev.point) existing.ev.point = ev.point;
+          if (typeof ev.endTime === "number") existing.ev.endTime = ev.endTime;
         }
       }
     }
@@ -190,12 +213,18 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
   const steps: GuideStep[] = [];
   let idx = 1;
 
-  for (const callId of orderedCallIds) {
+  for (const key of orderedKeys) {
     if (steps.length >= maxSteps) break;
-    const ev = actionsByCallId.get(callId)!;
-    const params = ev.params ?? {};
-    const method = ev.method ?? "action";
-    const ts = ev.endTime ?? ev.startTime ?? ev.timestamp ?? 0;
+    const { method, ev } = actionsByKey.get(key)!;
+    const params = ev.params && typeof ev.params === "object" ? ev.params : {};
+    const ts =
+      typeof ev.endTime === "number"
+        ? ev.endTime
+        : typeof ev.startTime === "number"
+          ? ev.startTime
+          : typeof ev.timestamp === "number"
+            ? ev.timestamp
+            : 0;
     const { title, detail } = formatActionTitle(method, params);
     const frame = findClosestFrame(frames, ts);
 
@@ -208,8 +237,11 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
       const resKey = `resources/${frame.sha1}`;
       const rawImg = entries.get(resKey) ?? entries.get(frame.sha1);
       if (rawImg) {
-        frameMime = guessMimeFromBytes(rawImg, resKey);
-        frameDataUri = `data:${frameMime};base64,${rawImg.toString("base64")}`;
+        const mime = detectRasterImageMime(rawImg);
+        if (mime) {
+          frameMime = mime;
+          frameDataUri = `data:${mime};base64,${rawImg.toString("base64")}`;
+        }
       }
     }
 

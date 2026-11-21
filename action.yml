@@ -40,7 +40,13 @@ runs:
         if [ -n "$INPUT_TITLE" ]; then
           args+=(--title "$INPUT_TITLE")
         fi
-        if [ "$INPUT_REDACT" = "true" ]; then
+        redact_lc="$(printf '%s' "$INPUT_REDACT" | tr '[:upper:]' '[:lower:]')"
+        if [ "$redact_lc" = "true" ] || [ "$redact_lc" = "1" ]; then
           args+=(--redact-pii)
+        elif [ "$redact_lc" = "false" ] || [ "$redact_lc" = "0" ]; then
+          args+=(--no-redact-pii)
+        else
+          echo "Invalid redact-pii input: $INPUT_REDACT (expected true or false)" >&2
+          exit 1
         fi
-        npx -y traceguide "${args[@]}"
+        npx -y traceguide@0.1.0 "${args[@]}"

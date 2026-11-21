@@ -18,6 +18,8 @@ export interface ParsedCliArgs {
   host: string;
   port: number;
   dbPath?: string;
+  publicUrl?: string;
+  apiToken?: string;
 }
 
 function printHelp(): void {
@@ -32,29 +34,53 @@ Options:
   --out <file.html>                        Output interactive HTML path (default: ./guide.html)
   --markdown <file.md>                     Also write Markdown guide to <file.md>
   --title <text>                           Custom guide title
-  --redact-pii                             Auto-redact emails, passwords, tokens, and API keys (default: false on build, true on --demo)
+  --redact-pii                             Auto-redact emails, passwords, tokens, and API keys (default: on)
+  --no-redact-pii                          Disable automatic PII redaction
   --host <addr>                            Bind host for serve (default: 127.0.0.1)
   --port <n>                               Listen port for serve (default: 4320)
   --db <path>                              SQLite database path for serve (default: ~/.traceguide/traceguide.db)
+  --public-url <url>                       Public base URL for generated iframe embed snippets
+  --token <secret>                         Optional Bearer API token for upload/edit/delete (or env TRACEGUIDE_API_TOKEN)
   -h, --help                               Show this help`);
 }
 
 function requireVal(argv: string[], i: number, flag: string): string {
   const v = argv[i + 1];
-  if (!v || v.trim().startsWith("-")) throw new Error(`Missing value for ${flag}`);
-  return v;
+  if (v === undefined || !v.trim() || v.trim().startsWith("-")) {
+    throw new Error(`Missing or empty value for ${flag}`);
+  }
+  return v.trim();
 }
 
-export function parseCliArgs(argv: string[]): ParsedCliArgs {
+export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedCliArgs {
   const parsed: ParsedCliArgs = {
     mode: "help",
     outPath: "./guide.html",
-    redactPii: false,
-    host: "127.0.0.1",
+    redactPii: true,
+    host: env.TRACEGUIDE_HOST?.trim() || "127.0.0.1",
     port: 4320,
+    dbPath: env.TRACEGUIDE_DB?.trim() || undefined,
+    publicUrl: env.TRACEGUIDE_PUBLIC_URL?.trim() || undefined,
+    apiToken: env.TRACEGUIDE_API_TOKEN?.trim() || undefined,
   };
 
+  if (env.TRACEGUIDE_PORT?.trim()) {
+    if (!/^\d+$/.test(env.TRACEGUIDE_PORT.trim())) throw new Error("TRACEGUIDE_PORT must be an integer 0..65535");
+    const ep = Number(env.TRACEGUIDE_PORT.trim());
+    if (ep < 0 || ep > 65535) throw new Error("TRACEGUIDE_PORT must be an integer 0..65535");
+    parsed.port = ep;
+  }
+
+  let explicitMode: ParsedCliArgs["mode"] | null = null;
   let explicitOut = false;
+
+  const setMode = (m: ParsedCliArgs["mode"]): void => {
+    if (explicitMode && explicitMode !== m) {
+      throw new Error(`Conflicting modes: "${explicitMode}" and "${m}" cannot be combined.`);
+    }
+    explicitMode = m;
+    parsed.mode = m;
+  };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -62,35 +88,44 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
       parsed.mode = "help";
       return parsed;
     } else if (arg === "build") {
-      parsed.mode = "build";
+      setMode("build");
     } else if (arg === "serve") {
-      parsed.mode = "serve";
+      setMode("serve");
     } else if (arg === "--demo") {
-      parsed.mode = "demo";
-      parsed.redactPii = true;
+      setMode("demo");
       if (!explicitOut) parsed.outPath = "./traceguide-demo.html";
     } else if (arg === "--out") {
-      parsed.outPath = requireVal(argv, i, "--out").trim();
+      parsed.outPath = requireVal(argv, i, "--out");
       explicitOut = true;
       i++;
     } else if (arg === "--markdown") {
-      parsed.markdownPath = requireVal(argv, i, "--markdown").trim();
+      parsed.markdownPath = requireVal(argv, i, "--markdown");
       i++;
     } else if (arg === "--title") {
-      parsed.title = requireVal(argv, i, "--title").trim();
+      parsed.title = requireVal(argv, i, "--title");
       i++;
     } else if (arg === "--redact-pii") {
       parsed.redactPii = true;
+    } else if (arg === "--no-redact-pii") {
+      parsed.redactPii = false;
     } else if (arg === "--host") {
-      parsed.host = requireVal(argv, i, "--host").trim();
+      parsed.host = requireVal(argv, i, "--host");
       i++;
     } else if (arg === "--port") {
-      const p = Number(requireVal(argv, i, "--port"));
-      if (!Number.isInteger(p) || p < 0 || p > 65535) throw new Error("--port must be an integer 0..65535");
+      const raw = requireVal(argv, i, "--port");
+      if (!/^\d+$/.test(raw)) throw new Error("--port must be an integer 0..65535");
+      const p = Number(raw);
+      if (p < 0 || p > 65535) throw new Error("--port must be an integer 0..65535");
       parsed.port = p;
       i++;
     } else if (arg === "--db") {
-      parsed.dbPath = requireVal(argv, i, "--db").trim();
+      parsed.dbPath = requireVal(argv, i, "--db");
+      i++;
+    } else if (arg === "--public-url") {
+      parsed.publicUrl = requireVal(argv, i, "--public-url");
+      i++;
+    } else if (arg === "--token") {
+      parsed.apiToken = requireVal(argv, i, "--token");
       i++;
     } else if (parsed.mode === "build" && !arg.startsWith("-") && !parsed.tracePath) {
       parsed.tracePath = arg;
@@ -115,10 +150,19 @@ async function main(): Promise<void> {
 
   if (args.mode === "serve") {
     const dbPath = args.dbPath ?? join(homedir(), ".traceguide", "traceguide.db");
-    const running = await startTraceguideServer({ host: args.host, port: args.port, dbPath });
+    const running = await startTraceguideServer({
+      host: args.host,
+      port: args.port,
+      dbPath,
+      publicUrl: args.publicUrl,
+      apiToken: args.apiToken,
+    });
     console.log(`traceguide v0.1.0 library server listening on ${running.url}`);
     console.log("  Upload a Playwright trace.zip via POST /api/guides/upload?redact=1");
+    let shuttingDown = false;
     const shutdown = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       await running.close();
       process.exit(0);
     };

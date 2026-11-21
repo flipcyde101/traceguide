@@ -8,9 +8,13 @@ function mdCode(text: string): string {
   return safe.startsWith("`") || safe.endsWith("`") ? `${fence} ${safe} ${fence}` : `${fence}${safe}${fence}`;
 }
 
+function sanitizeHeading(text: string): string {
+  return text.replace(/\r?\n/g, " ").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+}
+
 export function renderGuideMarkdown(guide: Guide): string {
   const lines: string[] = [
-    `# ${guide.title}`,
+    `# ${sanitizeHeading(guide.title)}`,
     "",
     `- **Steps:** ${guide.steps.length}`,
     `- **Viewport:** ${guide.viewportWidth}x${guide.viewportHeight}`,
@@ -19,10 +23,10 @@ export function renderGuideMarkdown(guide: Guide): string {
   ];
 
   for (const step of guide.steps) {
-    lines.push(`## Step ${step.index}: ${step.title}`);
+    lines.push(`## Step ${step.index}: ${sanitizeHeading(step.title)}`);
     lines.push("");
     if (step.detail) {
-      lines.push(step.detail);
+      lines.push(sanitizeHeading(step.detail));
       lines.push("");
     }
     const meta: string[] = [`Action: ${mdCode(step.action)}`];
