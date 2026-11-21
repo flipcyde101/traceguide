@@ -233,7 +233,8 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
     const stepW = frame?.width ?? viewportWidth;
     const stepH = frame?.height ?? viewportHeight;
 
-    if (frame) {
+    // Text patterns cannot identify sensitive pixels anywhere in a screenshot.
+    if (frame && !opts.redactPii) {
       const resKey = `resources/${frame.sha1}`;
       const rawImg = entries.get(resKey) ?? entries.get(frame.sha1);
       if (rawImg) {
@@ -283,6 +284,7 @@ export function parsePlaywrightTraceZip(zipBuf: Buffer, opts: TraceParseOptions 
     viewportWidth,
     viewportHeight,
     redactedTotal: 0,
+    screenshotsOmitted: Boolean(opts.redactPii),
     steps,
   };
 

@@ -17,7 +17,7 @@ inputs:
     required: false
     default: ""
   redact-pii:
-    description: "Auto-redact emails, passwords, tokens, and API keys (true/false)"
+    description: "Scrub known PII patterns and omit screenshots (true/false)"
     required: false
     default: "true"
 runs:
@@ -49,4 +49,4 @@ runs:
           echo "Invalid redact-pii input: $INPUT_REDACT (expected true or false)" >&2
           exit 1
         fi
-        npx -y traceguide@0.1.0 "${args[@]}"
+        npx -y traceguide@0.1.1 "${args[@]}"

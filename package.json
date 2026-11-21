@@ -1,6 +1,6 @@
 {
   "name": "traceguide",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-hosted Scribe/Arcade alternative: turn Playwright trace.zip files into auto-redacted interactive click-through guides and Markdown docs (CLI, SQLite server, Docker, GitHub Action).",
   "license": "MIT",
   "type": "module",

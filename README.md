@@ -14,7 +14,9 @@
 npx traceguide --demo
 ```
 
-Generates a real Playwright-format `trace.zip` for a 4-step "Create Production API Key" flow, auto-redacts email and secret inputs with blur masks, and outputs a standalone zero-dependency interactive click-through player at `./traceguide-demo.html`.
+Generates a Playwright-format `trace.zip` for a 4-step demo flow, redacts known sensitive text, and writes an interactive player at `./traceguide-demo.html`. The default export omits screenshots and retains the step captions, redaction markers, and click positions.
+
+**Upgrading from v0.1.0:** Regenerate older redacted HTML before sharing it. The old player could retain the original images under its visual blur. The updated library withholds images when serving older entries. Existing database files and previously shared exports may still contain their original images.
 
 ---
 
@@ -35,7 +37,7 @@ npx traceguide serve
 ### Reusable GitHub Action (Auto-Update Docs on Every PR)
 
 ```yaml
-- uses: flipcyde101/traceguide@v0.1.0
+- uses: flipcyde101/traceguide@v0.1.1
   with:
     trace: test-results/onboarding/trace.zip
     out: ./docs/onboarding.html
@@ -63,7 +65,7 @@ volumes:
 
 - **Pure-TS zero-dependency ZIP parser:** Reads Playwright `trace.zip` archives directly with `node:zlib`, enforcing strict zip-slip path rejection and decompression size caps.
 - **ARIA/role auto-captions + click rings:** Matches Playwright actions (`goto`, `click`, `fill`, `press`, `check`, `selectOption`) to their nearest `screencast-frame` image and draws animated click rings at exact `(x, y)` coordinates.
-- **Automatic PII & secret redaction (`--redact-pii`):** Scrubs emails, passwords, Bearer/JWT tokens, OpenAI/GitHub/AWS API keys, and card numbers from captions and overlays blur masks directly over sensitive regions.
+- **PII redaction (`--redact-pii`, default):** Scrubs known sensitive text patterns, including emails, tokens, and sensitive inputs. It omits all original screenshots, including frames without text matches. Use `--no-redact-pii` or library upload `?redact=0` only for traces already safe to share.
 - **Standalone HTML + Markdown + `<iframe>` embed:** Outputs a zero-dependency single HTML file with keyboard navigation (`ArrowLeft`/`ArrowRight`), 1-click **Copy Markdown**, and 1-click **Copy Embed `<iframe>`**.
 
 ---
@@ -74,7 +76,7 @@ volumes:
 |---|---|---|---|
 | **Self-hosted / MIT open source** | **Yes** (single Node 24 package / Docker) | No (per-seat SaaS) | Local debug viewer |
 | **Auto-updates guides from CI E2E traces** | **Yes** (`trace.zip` + GitHub Action) | Manual re-recording | No customer guide output |
-| **Built-in PII & secret auto-redaction** | **Yes** (`--redact-pii` + blur masks) | Paid tiers / manual | No |
+| **Built-in PII & secret auto-redaction** | **Yes** (known text patterns and screenshot omission) | Paid tiers / manual | No |
 | **Where commercial tools win** | (CI-driven docs & zero SaaS cost) | Browser click-recorder extensions, voiceover/AI narration, hosted team analytics | Deep DOM/network/console test failure debugging |
 
 ---
@@ -84,7 +86,7 @@ volumes:
 ```mermaid
 flowchart LR
     Zip["Playwright trace.zip\n(*.trace NDJSON + resources/*)"] --> Parser["Zero-Dep ZIP & Action Parser\n(Click Coords + ARIA Captions)"]
-    Parser --> Redact["PII & Secret Auto-Redactor\n(Text Scrub + Blur Boxes)"]
+    Parser --> Redact["PII & Secret Auto-Redactor\n(Text Scrub + Screenshot Omission)"]
     Redact --> Out["Standalone Interactive HTML\n+ Markdown + SQLite Library"]
 ```
 

@@ -72,6 +72,10 @@ export function isSensitiveSelector(selector: string | undefined): boolean {
   return Boolean(selector && SENSITIVE_SELECTOR_RE.test(selector));
 }
 
+export function omitStepScreenshot(step: GuideStep): GuideStep {
+  return { ...step, frameMime: undefined, frameDataUri: undefined };
+}
+
 export function redactGuideStep(step: GuideStep): GuideStep {
   const blurBoxes: BlurBox[] = [...step.blurBoxes];
   let redactedCount = step.redactedCount;
@@ -123,7 +127,7 @@ export function redactGuideStep(step: GuideStep): GuideStep {
   }
 
   return {
-    ...step,
+    ...omitStepScreenshot(step),
     title,
     detail,
     selector,
@@ -144,5 +148,6 @@ export function redactGuide(guide: Guide): Guide {
     sourceFile: srcRes.text,
     steps,
     redactedTotal,
+    screenshotsOmitted: true,
   };
 }

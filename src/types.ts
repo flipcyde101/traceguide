@@ -32,6 +32,8 @@ export interface Guide {
   viewportWidth: number;
   viewportHeight: number;
   redactedTotal: number;
+  /** Missing for older guides. Only an explicit false may export screenshots. */
+  screenshotsOmitted?: boolean;
   steps: GuideStep[];
 }
 

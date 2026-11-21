@@ -1,5 +1,6 @@
 import type { Guide } from "../types.js";
 import { renderGuideMarkdown } from "./markdown.js";
+import { omitStepScreenshot } from "../redact/pii.js";
 
 const SAFE_RASTER_DATA_URI_RE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 
@@ -34,12 +35,16 @@ function sanitizeEmbedUrl(raw: string | undefined, guideId: string): string {
 }
 
 export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string; scriptNonce?: string } = {}): string {
+  const screenshotsOmitted = guide.screenshotsOmitted !== false;
   const sanitizedGuide: Guide = {
     ...guide,
-    steps: guide.steps.map((s) => ({
-      ...s,
-      frameDataUri: s.frameDataUri && SAFE_RASTER_DATA_URI_RE.test(s.frameDataUri) ? s.frameDataUri : undefined,
-    })),
+    screenshotsOmitted,
+    steps: guide.steps.map((step) => {
+      if (screenshotsOmitted || !step.frameDataUri || !SAFE_RASTER_DATA_URI_RE.test(step.frameDataUri)) {
+        return omitStepScreenshot(step);
+      }
+      return step;
+    }),
   };
 
   const markdown = renderGuideMarkdown(sanitizedGuide);
@@ -88,6 +93,7 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string; scriptN
       <strong>${escapeHtml(sanitizedGuide.title)}</strong>
       <span class="badge">${sanitizedGuide.steps.length} steps</span>
       <span class="badge redacted">${sanitizedGuide.redactedTotal} PII redacted</span>
+      ${screenshotsOmitted ? '<span class="badge">Screenshots omitted</span>' : ''}
     </div>
     <div class="actions">
       <button id="copy-md-btn">Copy Markdown</button>
@@ -162,7 +168,9 @@ export function renderGuideHtml(guide: Guide, opts: { embedUrl?: string; scriptN
       } else {
         const empty = document.createElement("div");
         empty.style.color = "#8b949e";
-        empty.textContent = "No screencast frame recorded for this step";
+        empty.textContent = DATA.guide.screenshotsOmitted
+          ? "Screenshots omitted for privacy"
+          : "No screencast frame recorded for this step";
         frameEl.appendChild(empty);
       }
 

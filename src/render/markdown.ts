@@ -22,6 +22,10 @@ export function renderGuideMarkdown(guide: Guide): string {
     "",
   ];
 
+  if (guide.screenshotsOmitted !== false) {
+    lines.push("Screenshots omitted for privacy.", "");
+  }
+
   for (const step of guide.steps) {
     lines.push(`## Step ${step.index}: ${sanitizeHeading(step.title)}`);
     lines.push("");
@@ -35,7 +39,7 @@ export function renderGuideMarkdown(guide: Guide): string {
       meta.push(`Click: (${step.clickXPercent.toFixed(1)}%, ${step.clickYPercent.toFixed(1)}%)`);
     }
     if (step.blurBoxes.length > 0) {
-      meta.push(`Blurred regions: ${step.blurBoxes.length}`);
+      meta.push(`Redaction markers: ${step.blurBoxes.length}`);
     }
     lines.push(`_${meta.join(" | ")}_`);
     lines.push("");

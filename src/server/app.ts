@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { omitStepScreenshot } from "../redact/pii.js";
 import { renderGuideHtml } from "../render/html.js";
 import { renderGuideMarkdown } from "../render/markdown.js";
 import { parsePlaywrightTraceZip } from "../trace/parser.js";
@@ -326,7 +327,7 @@ export async function startTraceguideServer(opts: TraceguideServerOptions = {}):
                 }));
             }
             saveGuide(guide);
-            sendJson(res, 200, step);
+            sendJson(res, 200, guide.screenshotsOmitted === false ? step : omitStepScreenshot(step));
           } catch (err) {
             const status = err instanceof PayloadTooLargeError ? 413 : 400;
             sendJson(res, status, { error: (err as Error).message });

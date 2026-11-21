@@ -31,5 +31,17 @@ describe("built dist/cli.js --demo end-to-end", () => {
     expect(html).toContain("Create Production API Key (Demo)");
     expect(html).not.toContain("dillon@acme-staging.io");
     expect(html).not.toContain("sk-live-");
+    const md = readFileSync(outMd, "utf8");
+    const unredactedHtml = join(dir, "unredacted.html");
+    execFileSync(process.execPath, [cliPath, "--demo", "--no-redact-pii", "--out", unredactedHtml]);
+    const originalImages = readFileSync(unredactedHtml, "utf8").match(/data:image\/png;base64,[A-Za-z0-9+/=]+/g) ?? [];
+    expect(originalImages).toHaveLength(4);
+    expect(html).not.toMatch(/data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+/);
+    expect(html).toContain("Screenshots omitted");
+    expect(md).toContain("Screenshots omitted");
+    for (const originalImage of originalImages) {
+      expect(html.includes(originalImage)).toBe(false);
+      expect(md.includes(originalImage)).toBe(false);
+    }
   });
 });

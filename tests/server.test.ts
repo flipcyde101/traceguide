@@ -1,13 +1,22 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { buildDemoPlaywrightTraceZip } from "../src/demo/fixture.js";
 import { startTraceguideServer, type RunningTraceguideServer } from "../src/server/app.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { parsePlaywrightTraceZip } from "../src/trace/parser.js";
 
 describe("self-hosted SQLite guide library server", () => {
   const servers: RunningTraceguideServer[] = [];
+  const dirs: string[] = [];
 
   afterEach(async () => {
     while (servers.length > 0) {
       await servers.pop()!.close();
+    }
+    while (dirs.length > 0) {
+      rmSync(dirs.pop()!, { recursive: true, force: true });
     }
   });
 
@@ -31,7 +40,10 @@ describe("self-hosted SQLite guide library server", () => {
 
     const htmlRes = await fetch(`${srv.url}/guides/${created.id}`);
     expect(htmlRes.status).toBe(200);
-    expect(await htmlRes.text()).toContain("Demo Keys");
+    const html = await htmlRes.text();
+    expect(html).toContain("Demo Keys");
+    expect(html).toContain("Screenshots omitted");
+    expect(html).not.toMatch(/data:image\/png;base64,[A-Za-z0-9+/=]+/);
 
     const mdRes = await fetch(`${srv.url}/guides/${created.id}/markdown`);
     expect(mdRes.status).toBe(200);
@@ -50,5 +62,41 @@ describe("self-hosted SQLite guide library server", () => {
 
     const delRes = await fetch(`${srv.url}/api/guides/${created.id}`, { method: "DELETE" });
     expect(delRes.status).toBe(200);
+  });
+
+  it("withholds frames from legacy library exports and edits while retaining new explicit opt-outs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "traceguide-legacy-test-"));
+    dirs.push(dir);
+    const dbPath = join(dir, "library.db");
+    const srv = await startTraceguideServer({ port: 0, dbPath });
+    servers.push(srv);
+    const zip = buildDemoPlaywrightTraceZip();
+    const legacy = parsePlaywrightTraceZip(zip, { redactPii: false });
+    const originalFrame = legacy.steps[0].frameDataUri!;
+    expect(originalFrame.startsWith("data:image/png;base64,")).toBe(true);
+    delete legacy.screenshotsOmitted;
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.prepare("INSERT INTO guides (id, title, created_at, guide_json) VALUES (?, ?, ?, ?)")
+        .run(legacy.id, legacy.title, legacy.createdAt, JSON.stringify(legacy));
+    } finally {
+      db.close();
+    }
+    const legacyHtml = await (await fetch(`${srv.url}/guides/${legacy.id}`)).text();
+    expect(legacyHtml.includes(originalFrame)).toBe(false);
+    expect(legacyHtml).toContain("Screenshots omitted");
+    const edited = await fetch(`${srv.url}/api/guides/${legacy.id}/steps/1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Edited demo step" }),
+    });
+    expect(edited.status).toBe(200);
+    expect(await edited.json()).not.toHaveProperty("frameDataUri");
+
+    const raw = await fetch(`${srv.url}/api/guides/upload?redact=0`, { method: "POST", body: new Uint8Array(zip) });
+    expect(raw.status).toBe(201);
+    const { id } = await raw.json() as { id: string };
+    const rawHtml = await (await fetch(`${srv.url}/guides/${id}`)).text();
+    expect(rawHtml.includes(originalFrame)).toBe(true);
   });
 });

@@ -23,7 +23,7 @@ export interface ParsedCliArgs {
 }
 
 function printHelp(): void {
-  console.log(`traceguide v0.1.0 - Turn Playwright trace.zip files into self-hosted interactive guides (OSS Scribe/Arcade)
+  console.log(`traceguide v0.1.1 - Turn Playwright trace.zip files into self-hosted interactive guides (OSS Scribe/Arcade)
 
 Usage:
   traceguide build <trace.zip> [options]   Compile Playwright trace.zip into interactive HTML + Markdown
@@ -34,8 +34,8 @@ Options:
   --out <file.html>                        Output interactive HTML path (default: ./guide.html)
   --markdown <file.md>                     Also write Markdown guide to <file.md>
   --title <text>                           Custom guide title
-  --redact-pii                             Auto-redact emails, passwords, tokens, and API keys (default: on)
-  --no-redact-pii                          Disable automatic PII redaction
+  --redact-pii                             Scrub known PII patterns and omit all screenshots (default: on)
+  --no-redact-pii                          Keep original text and screenshots. Use only with safe traces.
   --host <addr>                            Bind host for serve (default: 127.0.0.1)
   --port <n>                               Listen port for serve (default: 4320)
   --db <path>                              SQLite database path for serve (default: ~/.traceguide/traceguide.db)
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
       publicUrl: args.publicUrl,
       apiToken: args.apiToken,
     });
-    console.log(`traceguide v0.1.0 library server listening on ${running.url}`);
+    console.log(`traceguide v0.1.1 library server listening on ${running.url}`);
     console.log("  Upload a Playwright trace.zip via POST /api/guides/upload?redact=1");
     let shuttingDown = false;
     const shutdown = async () => {

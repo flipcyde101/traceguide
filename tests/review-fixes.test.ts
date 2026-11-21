@@ -47,9 +47,9 @@ describe("traceguide whole-branch review regression fixes (C1-C3, I1-I12, M1-M6)
     const tsCheck = redactText("timestamp 1732200000000 order 9001234567891");
     expect(tsCheck.count).toBe(0);
 
-    // Demo fixture frames must be safe raster PNG (I3) and contain zero raw email/API key text even after base64 decode
+    // Redacted fixtures must not include the original raster frames.
     const demoGuide = parsePlaywrightTraceZip(buildDemoPlaywrightTraceZip(), { redactPii: true });
-    expect(demoGuide.steps[0].frameMime).toBe("image/png");
+    expect(demoGuide.steps.every((step) => !step.frameDataUri && !step.frameMime)).toBe(true);
   });
 
   it("C2, I1, I2: enforces CRC32 integrity on read and handles ZIP comments containing EOCD bytes", () => {
@@ -126,7 +126,7 @@ describe("traceguide whole-branch review regression fixes (C1-C3, I1-I12, M1-M6)
     expect(() => parseCliArgs(["build", "a.zip", "serve"])).toThrow();
 
     const actionYml = readFileSync(join(process.cwd(), "action.yml"), "utf8");
-    expect(actionYml).toContain("traceguide@0.1.0");
+    expect(actionYml).toContain("traceguide@0.1.1");
     const dockerfile = readFileSync(join(process.cwd(), "Dockerfile"), "utf8");
     expect(dockerfile).toContain("USER node");
     const compose = readFileSync(join(process.cwd(), "docker-compose.yml"), "utf8");
