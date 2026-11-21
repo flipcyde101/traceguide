@@ -1,0 +1,10 @@
+node_modules/
+dist/
+work/
+.traceguide/
+*.db
+*.db-wal
+*.db-shm
+.superpowers/
+.DS_Store
+Thumbs.db
