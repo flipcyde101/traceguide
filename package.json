@@ -1,0 +1,55 @@
+{
+  "name": "traceguide",
+  "version": "0.1.0",
+  "description": "Self-hosted Scribe/Arcade alternative: turn Playwright trace.zip files into auto-redacted interactive click-through guides and Markdown docs (CLI, SQLite server, Docker, GitHub Action).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/flipcyde101/traceguide.git"
+  },
+  "homepage": "https://github.com/flipcyde101/traceguide#readme",
+  "bugs": {
+    "url": "https://github.com/flipcyde101/traceguide/issues"
+  },
+  "bin": {
+    "traceguide": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "action.yml",
+    "Dockerfile",
+    "docker-compose.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
+  },
+  "keywords": [
+    "playwright",
+    "documentation",
+    "interactive-guides",
+    "scribe-alternative",
+    "arcade-alternative",
+    "self-hosted",
+    "e2e",
+    "pii-redaction",
+    "github-actions",
+    "devtools"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

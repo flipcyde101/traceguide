@@ -1,0 +1,46 @@
+name: "traceguide CI Doc Builder"
+description: "Compile Playwright trace.zip files into auto-redacted interactive HTML guides and Markdown docs in CI."
+inputs:
+  trace:
+    description: "Path to Playwright trace.zip file"
+    required: true
+  out:
+    description: "Output HTML file path"
+    required: false
+    default: "./docs/guide.html"
+  markdown-out:
+    description: "Optional Markdown output file path"
+    required: false
+    default: ""
+  title:
+    description: "Optional custom guide title"
+    required: false
+    default: ""
+  redact-pii:
+    description: "Auto-redact emails, passwords, tokens, and API keys (true/false)"
+    required: false
+    default: "true"
+runs:
+  using: "composite"
+  steps:
+    - name: Build interactive guide with traceguide
+      shell: bash
+      env:
+        INPUT_TRACE: ${{ inputs.trace }}
+        INPUT_OUT: ${{ inputs.out }}
+        INPUT_MD_OUT: ${{ inputs.markdown-out }}
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_REDACT: ${{ inputs.redact-pii }}
+      run: |
+        set -euo pipefail
+        args=(build "$INPUT_TRACE" --out "$INPUT_OUT")
+        if [ -n "$INPUT_MD_OUT" ]; then
+          args+=(--markdown "$INPUT_MD_OUT")
+        fi
+        if [ -n "$INPUT_TITLE" ]; then
+          args+=(--title "$INPUT_TITLE")
+        fi
+        if [ "$INPUT_REDACT" = "true" ]; then
+          args+=(--redact-pii)
+        fi
+        npx -y traceguide "${args[@]}"

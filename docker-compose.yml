@@ -1,0 +1,10 @@
+services:
+  traceguide:
+    build: .
+    ports:
+      - "4320:4320"
+    volumes:
+      - traceguide_data:/data
+
+volumes:
+  traceguide_data:
